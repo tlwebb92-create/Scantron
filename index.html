@@ -392,8 +392,17 @@ header {
       <span class="version">v2.0</span>
     </div>
     <div class="header-sub">
-      AI-Powered Bubble Sheet Grader<br>
-      BMCC · Multiple Choice Exams
+      AI-Powered Bubble Sheet Grader · BMCC<br>
+      <span style="font-size:10px;">Powered by Google Gemini (free)</span><br>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:10px;color:var(--muted);">API Key:</span>
+        <input id="gemini-key-input" type="password" placeholder="Paste your Gemini API key"
+          style="font-family:'IBM Plex Mono';font-size:11px;padding:5px 10px;border:1.5px solid var(--border);
+          border-radius:3px;background:var(--surface);color:var(--ink);width:260px;outline:none;"
+          oninput="updateGeminiKey(this.value)">
+        <a href="https://aistudio.google.com/app/apikey" target="_blank"
+          style="font-size:10px;color:var(--accent3);">Get free key ↗</a>
+      </div>
     </div>
   </header>
 
@@ -551,9 +560,10 @@ async function fileToImages(file) {
   });
 }
 
-// ── API ENDPOINT — change this to your Cloudflare Worker URL after deploying ──
-const API_ENDPOINT = 'https://gradeai-proxy.tlwebb92.workers.dev';
-// Example: 'https://gradeai-proxy.myname.workers.dev'
+// ── GEMINI API — free tier, no proxy needed ──
+// Get your free API key at: https://aistudio.google.com/app/apikey
+const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';
+const GEMINI_MODEL = 'gemini-1.5-flash';
 
 // ── DEBUG ──
 function debugLog(msg) {
@@ -563,6 +573,40 @@ function debugLog(msg) {
   panel.style.display = 'block';
   log.textContent += msg + '\n---\n';
   log.scrollTop = log.scrollHeight;
+}
+
+// ── GEMINI API HELPER ──
+async function callGemini(prompt, imageB64, imageType, isPdf) {
+  const key = window._geminiKey || GEMINI_API_KEY;
+  if (!key || key === 'YOUR_GEMINI_API_KEY') throw new Error('Please enter your Gemini API key at the top of the page');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  
+  let parts = [];
+  
+  if (isPdf) {
+    parts.push({ inline_data: { mime_type: 'application/pdf', data: imageB64 } });
+  } else if (imageB64) {
+    parts.push({ inline_data: { mime_type: imageType || 'image/jpeg', data: imageB64 } });
+  }
+  parts.push({ text: prompt });
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { temperature: 0, maxOutputTokens: 600 }
+    })
+  });
+
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.error?.message || 'Gemini API error');
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+function updateGeminiKey(val) {
+  // Update the key constant dynamically
+  window._geminiKey = val.trim();
 }
 
 // ── STATE ──
@@ -651,22 +695,8 @@ Return ONLY a JSON object mapping question number to the filled answer letter:
 
 No markdown, no explanation. Just the JSON.`;
 
-        const resp = await fetch(API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 500,
-            messages: [{ role: 'user', content: [
-              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: keyImage.base64 } },
-              { type: 'text', text: prompt }
-            ]}]
-          })
-        });
-        const data = await resp.json();
-        debugLog('PDF col ' + (col+1) + ' status=' + resp.status);
-        if (!resp.ok || data.error) throw new Error(data.error?.message || 'API error col ' + (col+1));
-        const raw = data.content.map(b => b.text || '').join('');
+        const raw = await callGemini(prompt, keyImage.base64, 'application/pdf', true);
+        debugLog('PDF col ' + (col+1) + ' raw: ' + raw.slice(0,100));
         debugLog('PDF col ' + (col+1) + ' raw: ' + raw);
         const m = raw.match(/\{[\s\S]*\}/);
         if (!m) throw new Error('No JSON in col ' + (col+1) + ': ' + raw.slice(0, 200));
@@ -709,22 +739,8 @@ Return ONLY JSON — no markdown, no explanation:
 
 Include all ${endQ - startQ + 1} questions.`;
 
-        const resp = await fetch(API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 500,
-            messages: [{ role: 'user', content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-              { type: 'text', text: prompt }
-            ]}]
-          })
-        });
-        const data = await resp.json();
-        debugLog('IMG col ' + (col+1) + ' status=' + resp.status);
-        if (!resp.ok || data.error) throw new Error(data.error?.message || 'API error col ' + (col+1));
-        const raw = data.content.map(b => b.text || '').join('');
+        const raw = await callGemini(prompt, b64, 'image/jpeg', false);
+        debugLog('IMG col ' + (col+1) + ' raw: ' + raw.slice(0,100));
         debugLog('IMG col ' + (col+1) + ' raw: ' + raw);
         const m = raw.match(/\{[\s\S]*\}/);
         if (!m) throw new Error('No JSON found for col ' + (col+1) + ': ' + raw.slice(0, 200));
@@ -997,21 +1013,7 @@ Return ONLY JSON with the STUDENT'S answer for each question:
 {"${startQ}":"A",...,"${endQ}":"B"}
 Use "blank" if no bubble is filled. No markdown, no explanation.`;
 
-      const resp = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
-          messages: [{ role: 'user', content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: s.base64 } },
-            { type: 'text', text: prompt }
-          ]}]
-        })
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) throw new Error(data.error?.message || 'API error');
-      const raw = data.content.map(b => b.text || '').join('');
+      const raw = await callGemini(prompt, s.base64, 'application/pdf', true);
       const m = raw.match(/\{[\s\S]*\}/);
       if (!m) throw new Error('Could not parse col ' + (col+1));
       const parsed = JSON.parse(m[0]);
@@ -1044,21 +1046,7 @@ Correct answers: ${keySnippet.join(', ')}
 Return ONLY JSON with the student's answer: {"${startQ}":"A",...,"${endQ}":"B"}
 Use "blank" if empty. No markdown.`;
 
-      const resp = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
-          messages: [{ role: 'user', content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-            { type: 'text', text: prompt }
-          ]}]
-        })
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) throw new Error(data.error?.message || 'API error');
-      const raw = data.content.map(b => b.text || '').join('');
+      const raw = await callGemini(prompt, b64, 'image/jpeg', false);
       const m = raw.match(/\{[\s\S]*\}/);
       if (!m) throw new Error('Could not parse col ' + (col+1));
       const parsed = JSON.parse(m[0]);
