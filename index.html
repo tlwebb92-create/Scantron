@@ -551,6 +551,10 @@ async function fileToImages(file) {
   });
 }
 
+// ── API ENDPOINT — change this to your Cloudflare Worker URL after deploying ──
+const API_ENDPOINT = 'https://gradeai-proxy.tlwebb92.workers.dev';
+// Example: 'https://gradeai-proxy.myname.workers.dev'
+
 // ── DEBUG ──
 function debugLog(msg) {
   console.log(msg);
@@ -647,7 +651,7 @@ Return ONLY a JSON object mapping question number to the filled answer letter:
 
 No markdown, no explanation. Just the JSON.`;
 
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        const resp = await fetch(API_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -705,7 +709,7 @@ Return ONLY JSON — no markdown, no explanation:
 
 Include all ${endQ - startQ + 1} questions.`;
 
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        const resp = await fetch(API_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -993,7 +997,7 @@ Return ONLY JSON with the STUDENT'S answer for each question:
 {"${startQ}":"A",...,"${endQ}":"B"}
 Use "blank" if no bubble is filled. No markdown, no explanation.`;
 
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      const resp = await fetch(API_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1040,7 +1044,7 @@ Correct answers: ${keySnippet.join(', ')}
 Return ONLY JSON with the student's answer: {"${startQ}":"A",...,"${endQ}":"B"}
 Use "blank" if empty. No markdown.`;
 
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      const resp = await fetch(API_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
